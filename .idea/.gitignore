@@ -8,3 +8,6 @@
 /dataSources.local.xml
 # Zeppelin ignored files
 /ZeppelinRemoteNotebooks/
+/copilot.data.migration.ask2agent.xml
+/misc.xml
+/vcs.xml

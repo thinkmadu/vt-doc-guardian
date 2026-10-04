@@ -1,4 +1,4 @@
-name: Auto Assign to Project
+name: Adicionar ao Project
 
 on:
   issues:
@@ -6,14 +6,14 @@ on:
   pull_request:
     types: [opened]
 
+permissions: {}
+
 jobs:
-  add-to-project:
-    name: Add issue or PR to GitHub Project
-    runs-on: ubuntu-latest
-    steps:
-      - name: Add to Project
-        uses: actions/add-to-project@v1.0.1
-        with:
-          # A URL do projeto que você vai criar no GitHub. Substitua o link abaixo pelo seu!
-          project-url: https://github.com/users/thinkmadu/projects/1
-          github-token: ${{ secrets.GITHUBTOKEN }}
+  add:
+    uses: thinkmadu/automacoes/.github/workflows/add-to-project.yml@main
+    with:
+      project-url: https://github.com/users/thinkmadu/projects/2
+    secrets:
+      # PAT classic só com `project`: o repositório é público, e qualquer
+      # pessoa dispara este job abrindo uma issue.
+      project-token: ${{ secrets.PROJECT_TOKEN }}

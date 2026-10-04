@@ -18,9 +18,11 @@ export default function Home() {
     }
   };
 
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
   const pollStatus = async (analysisId: string) => {
     try {
-      const res = await fetch(`http://localhost:8000/status/${analysisId}`);
+      const res = await fetch(`${API_BASE}/status/${analysisId}`);
       if (!res.ok) throw new Error("Falha ao checar status no backend");
       
       const data = await res.json();
@@ -51,7 +53,7 @@ export default function Home() {
     formData.append("file", file);
 
     try {
-      const res = await fetch("http://localhost:8000/upload", {
+      const res = await fetch(`${API_BASE}/upload`, {
         method: "POST",
         body: formData,
       });

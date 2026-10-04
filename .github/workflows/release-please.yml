@@ -2,17 +2,16 @@ name: Release Please
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   release-please:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: google-github-actions/release-please-action@v4
-        with:
-          release-type: python
+    permissions:
+      contents: write # tag, release e o commit do CHANGELOG
+      issues: write # etiquetas do pull request de release
+      pull-requests: write # abrir e atualizar o pull request de release
+    uses: thinkmadu/automacoes/.github/workflows/release-please.yml@main
+    with:
+      release-type: python

@@ -18,7 +18,8 @@ export default function Home() {
     }
   };
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  // Removemos barras no final da URL para evitar enviar /upload e gerar erro 404 "Not found" no backend
+  const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 
   const pollStatus = async (analysisId: string) => {
     try {

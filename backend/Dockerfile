@@ -19,5 +19,5 @@ COPY . .
 # Expor a porta em que a API vai rodar
 EXPOSE 8000
 
-# Comando para rodar a aplicação em produção
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Comando para rodar a aplicação em produção lendo a porta que a provedora exigir
+CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"

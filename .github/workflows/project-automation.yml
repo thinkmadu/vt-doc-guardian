@@ -16,4 +16,4 @@ jobs:
         with:
           # A URL do projeto que você vai criar no GitHub. Substitua o link abaixo pelo seu!
           project-url: https://github.com/users/thinkmadu/projects/1
-          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
+          github-token: ${{ secrets.GITHUBTOKEN }}

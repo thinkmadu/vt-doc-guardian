@@ -1,113 +1,63 @@
-# vt-doc-guardian
+# VT Doc Guardian
 
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
-[![VirusTotal API v3](https://img.shields.io/badge/VirusTotal-API_v3-green)](https://developers.virustotal.com)
-[![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/thinkmadu/vt-doc-guardian/actions/workflows/ci.yml/badge.svg)](https://github.com/thinkmadu/vt-doc-guardian/actions/workflows/ci.yml)
+[![Release](https://github.com/thinkmadu/vt-doc-guardian/actions/workflows/release-please.yml/badge.svg)](https://github.com/thinkmadu/vt-doc-guardian/actions/workflows/release-please.yml)
 
-**Scanner profissional para documentos (PDF/PPT/ODP) com detecção de malware + greyware e sistema de quarentena.**
+O **VT Doc Guardian** é uma plataforma open-source para análise estática e de segurança de documentos. Construída sobre a API do VirusTotal, ela permite a submissão e varredura de arquivos, com validação nativa de tipos MIME e feedback assíncrono de ameaças (malware e greyware).
 
----
+## Arquitetura
 
-## ⚙️ Instalação (Linux & Windows)
+O projeto foi projetado como um monorepo dividido em dois microserviços:
 
-### 1. Clone o repositório
+- **Frontend (Next.js 15):** Interface *client-side* limpa (focada em dados de segurança) com TailwindCSS. Utiliza uma estratégia de *polling* para acompanhar as análises pesadas, garantindo que o client não dependa de conexões síncronas longas em ambientes *serverless* (como Vercel).
+- **Backend (FastAPI):** API Python (assíncrona via `httpx`) responsável pela integração com o VirusTotal e validação estrita de segurança (`python-magic` para verificação de MIME spoofing).
 
+## Setup Local
+
+### Requisitos
+- Python 3.12+
+- Node.js 20+
+- Chave de API do VirusTotal
+
+### 1. Configurando a API (Backend)
 ```bash
-git clone https://github.com/seu-usuario/vt-doc-guardian.git
-cd vt-doc-guardian
-```
-
-### 2. Instale dependências
-
-#### Linux:
-
-```bash
-sudo apt-get install libmagic1
+cd backend
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
-
-#### Windows:
-
-```powershell
-# Instale primeiro o pacote binário do magic
-pip install python-magic-bin
-pip install -r requirements.txt
-```
-
-### 3. Configure sua chave API
-
-Crie arquivo `.env` na pasta do projeto:
-
-#### Linux:
-
+Crie seu arquivo de ambiente na pasta `/backend`:
 ```bash
-echo "VT_API_KEY=sua_chave_aqui" > .env
-chmod 600 .env  # Proteção crítica de credenciais
+cp .env.example .env
 ```
-
-#### Windows (PowerShell):
-
-```powershell
-"VT_API_KEY=sua_chave_aqui" | Out-File -FilePath .env -Encoding utf8
-# Permissões não são necessárias no Windows (mas mantenha o arquivo oculto)
-```
-
-> **Obtenha sua chave gratuita:** [VirusTotal Developers](https://www.virustotal.com/gui/join-us)
-
----
-
-## 🚀 Como usar?
-
-### Linux:
-
+Edite o arquivo `.env` inserindo a sua `VT_API_KEY`. Para subir a API:
 ```bash
-python3 vt-doc-guardian.py "/caminho/com/espaços"
-# OU
-./vt-doc-guardian.py /caminho/sem/espaços
+fastapi dev main.py
 ```
+A API rodará por padrão na porta `8000`.
 
-### Windows (PowerShell):
-
-```powershell
-python vt-doc-guardian.py "C:\Seus Documentos"
+### 2. Configurando o Cliente (Frontend)
+Em um novo terminal:
+```bash
+cd frontend
+npm install
+npm run dev
 ```
+Acesse o dashboard em `http://localhost:3000`.
 
----
+## Deploy (Produção)
 
-## 📋 Fluxo Básico
+O projeto está pronto para ir ao ar e inclui os arquivos essenciais de deploy (`Dockerfile`, `Procfile`).
 
-1. **Execute o script** com o caminho do diretório.
-2. **Responda** se quer incluir subpastas (s/n).
-3. **Aguarde** a análise (mostra progresso em tempo real).
-4. **Decida** o destino dos arquivos ignorados:
-   - `s` → Move para pasta de quarentena
-   - `n` → Mantém no local original
+### Backend (Render, DigitalOcean, Heroku)
+1. Crie um Web Service apontando para o diretório `/backend`.
+2. A plataforma detectará automaticamente o `Dockerfile`.
+3. Configure a variável secreta `VT_API_KEY`.
 
----
+### Frontend (Vercel, Netlify)
+1. Crie um novo projeto importando este repositório.
+2. Defina o Root Directory como `/frontend`.
+3. Na seção de *Environment Variables*, crie a chave `NEXT_PUBLIC_API_URL` com o valor apontando para a URL pública gerada no deploy do Backend (sem barra no final).
 
-## ⚠️ Notas por plataforma
-
-### Linux
-
-- **Permissões críticas**: Sempre use `chmod 600 .env`
-- **Caminhos com espaços**: Use aspas duplas (`"/caminho/com espaços"`)
-- **Execução direta**: Torne o script executável com `chmod +x vt-doc-guardian.py`
-
-### Windows
-
-- **python-magic-bin**: Obrigatório (o pacote padrão não funciona)
-- **Caminhos**: Use barras invertidas duplas ou aspas: `"C:\\Meus Documentos"`
-- **Erros comuns**:
-   - `magic.MagicException`: Falha na instalação do python-magic-bin
-   - `PermissionError`: Execute o terminal como administrador
-
----
-
-## 📁 Resultados
-
-- Relatório CSV em: `relatorio_virustotal.csv`
-- Quarentena criada automaticamente (ex: `quarantine_20260224_153045/`)
-- Arquivos perigosos excluídos imediatamente
-- Greyware detectado via campo `suspicious`
-
----
+## Contribuição
+As alterações seguem o padrão [Conventional Commits](https://www.conventionalcommits.org/). Todas as _features_ e _fixes_ devem passar pelo *linting* (Flake8 e ESLint) nas Actions de CI.

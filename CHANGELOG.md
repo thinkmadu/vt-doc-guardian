@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/thinkmadu/vt-doc-guardian/compare/v0.1.0...v0.1.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* sanitize API_BASE to prevent trailing slash double-slash 404 routing error ([01effd8](https://github.com/thinkmadu/vt-doc-guardian/commit/01effd8811dd61ccb96de5fc1169e9bed6305f49))
+
 ## 0.1.0 (2026-10-04)
 
 

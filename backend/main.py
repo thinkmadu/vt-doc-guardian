@@ -13,10 +13,10 @@ load_dotenv()
 
 app = FastAPI(title="VT Doc Guardian API")
 
-# Libera o CORS para o frontend (Next.js rodará na porta 3000)
+# Libera o CORS para o frontend (seja no localhost ou hospedado na Vercel)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

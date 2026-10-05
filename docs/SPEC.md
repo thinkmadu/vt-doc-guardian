@@ -1,48 +1,56 @@
 # Spec: VT Doc Guardian (Fullstack)
 
 ## Objective
-Transformar o script CLI `vt-doc-guardian.py` em uma aplicação web fullstack. O usuário poderá fazer o upload de documentos através de uma interface web bonita e moderna. O sistema utilizará a API do VirusTotal para analisar os arquivos e exibirá o relatório de segurança na própria interface.
+Aplicação web fullstack para quarentena, análise estática e threat intelligence de documentos suspeitos. O usuário faz o upload de documentos via console tático e recebe laudo completo com base nos motores de detecção do VirusTotal v3.
 
 ## Tech Stack
-- **Frontend:** Next.js (Pages Router), React, TailwindCSS. (Hospedado na Vercel).
-- **Backend:** FastAPI, Python 3.12. (Hospedado na DigitalOcean ou Heroku via Student Pack).
-- **Integrações:** API do VirusTotal.
+- **Frontend:** Next.js 15+ (App Router), React 19, TailwindCSS v4.
+- **Backend:** FastAPI, Python 3.12, HTTPX (assíncrono), python-magic.
+- **Integrações:** API do VirusTotal v3.
 
 ## Commands
 - **Backend Dev:** `cd backend && fastapi dev main.py`
+- **Backend Test:** `cd backend && PYTHONPATH=. pytest tests/`
+- **Backend Lint:** `cd backend && flake8 . --exclude=.venv,legacy_cli`
 - **Frontend Dev:** `cd frontend && npm run dev`
+- **Frontend Lint:** `cd frontend && npm run lint`
 - **Frontend Build:** `cd frontend && npm run build`
 
 ## Project Structure
 ```text
 /
-├── backend/            → API FastAPI (port do vt-doc-guardian.py)
-│   ├── main.py         → Endpoints principais (/upload, /status)
+├── backend/
+│   ├── app/
+│   │   ├── api/routes.py       (endpoints /upload e /status)
+│   │   ├── core/config.py      (pydantic-settings e CORS)
+│   │   ├── schemas/analysis.py (modelos Pydantic)
+│   │   └── services/           (validação MIME e cliente VirusTotal)
+│   ├── legacy_cli/             (script CLI original v3.3 preservado)
+│   ├── tests/                  (suíte de testes unitários com pytest)
+│   ├── main.py                 (entrypoint FastAPI com lifespan)
 │   ├── requirements.txt
-│   └── .env
-├── frontend/           → Interface Web Next.js
-│   ├── src/pages/      → Rotas da UI (Upload, Relatório)
-│   ├── src/components/ → Componentes React com Tailwind
+│   ├── Dockerfile
+│   └── .dockerignore
+├── frontend/
+│   ├── src/app/                (Next.js App Router: layout, globals, page)
+│   ├── src/components/         (Dropzone, ReportCard, Header, History)
+│   ├── src/types/analysis.ts   (interfaces e contratos TypeScript)
 │   └── package.json
-├── docs/               → Documentação e specs
-└── .github/            → Templates e Actions
+├── docs/SPEC.md                (especificação viva do projeto)
+└── .github/workflows/          (esteiras de CI e automações)
 ```
 
-## Arquitetura de Comunicação (Polling)
-Para respeitar os limites de provedores e manter a interface fluida:
-1. Frontend envia arquivo para a rota `POST /backend/upload`.
-2. Backend repassa para o VirusTotal e devolve imediatamente um `analysis_id`.
-3. Frontend faz *polling* a cada 3 segundos na rota `GET /backend/status/{analysis_id}`.
-4. Quando o backend retorna sucesso, o Frontend exibe o relatório e para o polling.
+## Arquitetura de Comunicação (Hash-First & Polling Seguro)
+1. **Validação Estrutural:** O backend inspeciona extensão e assinatura binária (`python-magic`), calculando o hash SHA-256 do arquivo.
+2. **Estratégia Hash-First:**
+   - O backend consulta `GET /files/{sha256}` no VirusTotal.
+   - Caso o arquivo já tenha sido analisado na base global, o veredito completo é retornado instantaneamente (< 1s), dispensando upload de binário e economizando cota.
+3. **Upload e Polling Amigável:**
+   - Se o arquivo for inédito (404), o backend realiza o upload via `POST /files` e retorna `analysis_id`.
+   - O frontend realiza polling a cada 15 segundos (intervalo ajustado para respeitar a cota pública de 4 req/min do VirusTotal), com limite de até 12 tentativas (3 minutos).
+4. **Histórico Local:** As últimas 5 análises são armazenadas em `localStorage` para navegação rápida entre relatórios na mesma estação.
 
 ## Boundaries
-- **Always:** Tratar erros da API do VirusTotal e timeouts com clareza para o usuário. Isolar o código frontend e backend para que funcionem independentes.
-- **Ask first:** Adição de novos serviços externos além do VirusTotal ou banco de dados.
-- **Never:** Comitar a `VT_API_KEY` ou expô-la em respostas de erro da API.
-
-## Success Criteria
-- O usuário consegue acessar a aplicação via navegador, arrastar um PDF ou DOCX, aguardar a barra de progresso (polling) e ver o resultado limpo (Malicioso/Suspeito/Seguro).
-- O backend consegue rodar sem estourar limites de timeout, pois responde imediatamente delegando o polling ao frontend.
-
-## Open Questions
-- Precisamos de uma página de histórico (com banco de dados PostgreSQL/SQLite) ou a ferramenta analisará e esquecerá o arquivo após recarregar a página?
+- **Always:** Tratar erros da API do VirusTotal e limites de cota (HTTP 429) com mensagens amigáveis.
+- **Never:** Comitar chaves de API (`VT_API_KEY`) ou expô-las nas respostas de erro.
+- **Formato:** Suporte amplo a suítes de escritório: PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, PPS, PPSX, ODT, ODS, ODP, RTF.

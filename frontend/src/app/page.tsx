@@ -1,176 +1,250 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { AnalysisProgress } from "@/components/AnalysisProgress";
+import { Dropzone } from "@/components/Dropzone";
+import { Header } from "@/components/Header";
+import { HistorySidebar } from "@/components/HistorySidebar";
+import { ReportCard } from "@/components/ReportCard";
+import { AnalysisReport, StepState } from "@/types/analysis";
+
+const STORAGE_KEY = "vt_doc_guardian_history_v1";
+const POLL_INTERVAL_MS = 15000; // 15s para respeitar limite da API pública do VT (4 req/min)
+const MAX_POLL_ATTEMPTS = 12; // Máximo de 3 minutos de polling
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [report, setReport] = useState<any>(null);
-  const [status, setStatus] = useState<string | null>(null);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0]);
-      setError(null);
-      setReport(null);
-      setStatus(null);
+  const [report, setReport] = useState<AnalysisReport | null>(null);
+  const [step, setStep] = useState<StepState>("idle");
+  const [statusText, setStatusText] = useState<string>("");
+  const [history, setHistory] = useState<AnalysisReport[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        return saved ? JSON.parse(saved) : [];
+      } catch {
+        return [];
+      }
     }
+    return [];
+  });
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pollAttemptsRef = useRef<number>(0);
+
+  // Limpa timer se o componente for desmontado
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+      }
+    };
+  }, []);
+
+  const saveToHistory = (newReport: AnalysisReport) => {
+    setHistory((prev) => {
+      const filtered = prev.filter((item) => item.sha256 !== newReport.sha256);
+      const updated = [{ ...newReport, analyzed_at: new Date().toISOString() }, ...filtered].slice(0, 5);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      } catch {
+        // Ignora erro de cota de localStorage
+      }
+      return updated;
+    });
   };
 
-  // Removemos barras no final da URL para evitar enviar /upload e gerar erro 404 "Not found" no backend
+  const handleClearHistory = () => {
+    localStorage.removeItem(STORAGE_KEY);
+    setHistory([]);
+    setIsHistoryOpen(false);
+  };
+
+  const handleReset = () => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+    }
+    setFile(null);
+    setReport(null);
+    setError(null);
+    setIsUploading(false);
+    setStep("idle");
+    setStatusText("");
+  };
+
   const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 
-  const pollStatus = async (analysisId: string) => {
+  const pollStatus = async (analysisId: string, currentFile: File, sha256: string) => {
+    pollAttemptsRef.current += 1;
+
+    if (pollAttemptsRef.current > MAX_POLL_ATTEMPTS) {
+      setError("Tempo limite de análise excedido. Os motores do VirusTotal ainda estão processando a fila.");
+      setIsUploading(false);
+      setStep("error");
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE}/status/${analysisId}`);
-      if (!res.ok) throw new Error("Falha ao checar status no backend");
-      
-      const data = await res.json();
-      
-      if (data.status === "completed") {
-        setReport(data);
-        setStatus("Concluído");
-        setIsUploading(false);
-      } else {
-        setStatus(`Analisando arquivo... (${data.status})`);
-        setTimeout(() => pollStatus(analysisId), 3000);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || "Falha ao checar status no servidor.");
       }
-    } catch (err: any) {
-      setError(err.message);
+
+      const data = await res.json();
+
+      if (data.status === "completed") {
+        const fullReport: AnalysisReport = {
+          analysis_id: analysisId,
+          filename: currentFile.name,
+          status: "completed",
+          sha256,
+          file_size: currentFile.size,
+          is_cached: false,
+          stats: data.stats,
+          malicious: data.malicious || 0,
+          suspicious: data.suspicious || 0,
+          total_engines: data.total_engines || 0,
+          verdict: data.verdict,
+          detections: data.detections || [],
+        };
+
+        setReport(fullReport);
+        setStep("completed");
+        setIsUploading(false);
+        saveToHistory(fullReport);
+      } else {
+        setStep("scanning");
+        setStatusText(
+          `Varredura nos motores antivírus em andamento (${data.status}). Tentativa ${pollAttemptsRef.current}/${MAX_POLL_ATTEMPTS}...`
+        );
+        pollTimerRef.current = setTimeout(
+          () => pollStatus(analysisId, currentFile, sha256),
+          POLL_INTERVAL_MS
+        );
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro desconhecido durante polling.";
+      setError(message);
       setIsUploading(false);
+      setStep("error");
     }
   };
 
-  const handleUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleStartAnalysis = async () => {
     if (!file) return;
 
     setIsUploading(true);
     setError(null);
-    setStatus("Enviando...");
+    setReport(null);
+    pollAttemptsRef.current = 0;
+
+    // Etapa 1: Validação
+    setStep("validating");
+    setStatusText("Inspecionando assinatura estática e integridade do arquivo...");
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
+      // Etapa 2: Threat Intel Hash Check
+      setStep("checking_cache");
+      setStatusText("Transmitindo para validação estrutural e verificação de cache global...");
+
       const res = await fetch(`${API_BASE}/upload`, {
         method: "POST",
         body: formData,
       });
 
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.detail || "Erro no upload");
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Erro ao processar documento no backend.");
       }
 
-      const data = await res.json();
-      setStatus("Upload concluído. Aguardando análise da API...");
-      pollStatus(data.analysis_id);
-    } catch (err: any) {
-      setError(err.message);
+      const data: AnalysisReport = await res.json();
+
+      // Se a resposta veio instantânea pelo hash-first
+      if (data.status === "completed" && data.is_cached) {
+        setReport(data);
+        setStep("completed");
+        setIsUploading(false);
+        saveToHistory(data);
+        return;
+      }
+
+      // Se entrou na fila do VirusTotal
+      setStep("scanning");
+      setStatusText("Arquivo registrado na fila do VirusTotal. Aguardando motores antivírus...");
+      pollTimerRef.current = setTimeout(
+        () => pollStatus(data.analysis_id || "", file, data.sha256),
+        POLL_INTERVAL_MS
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Falha na comunicação com o backend.";
+      setError(message);
       setIsUploading(false);
+      setStep("error");
     }
   };
 
   return (
-    <main className="min-h-screen p-8 md:p-24 max-w-4xl mx-auto flex flex-col gap-12">
-      <header className="border-b border-[var(--border)] pb-8">
-        <h1 className="text-2xl font-bold uppercase tracking-widest text-zinc-100 mb-2">
-          VT Doc Guardian
-        </h1>
-        <p className="text-sm text-zinc-400 font-mono">
-          Security Analysis Engine // Powered by VirusTotal
-        </p>
-      </header>
+    <main className="min-h-screen p-6 md:p-16 max-w-4xl mx-auto flex flex-col gap-8">
+      <Header
+        hasHistory={history.length > 0}
+        onToggleHistory={() => setIsHistoryOpen(!isHistoryOpen)}
+        isHistoryOpen={isHistoryOpen}
+      />
 
-      <section className="bg-[#181a1f] border border-[var(--border)] p-8">
-        <form onSubmit={handleUpload} className="flex flex-col gap-6">
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 mb-4">
-              Upload Document
-            </label>
-            <input
-              type="file"
-              onChange={handleFileChange}
-              disabled={isUploading}
-              accept=".pdf,.ppt,.pptx,.pps,.ppsx,.odp"
-              className="block w-full text-sm text-zinc-400
-                file:mr-4 file:py-2 file:px-4
-                file:border-0 file:text-sm file:font-mono file:font-semibold
-                file:bg-zinc-800 file:text-zinc-300
-                hover:file:bg-zinc-700 hover:file:cursor-pointer
-                file:transition-colors"
-            />
-          </div>
-          
-          <button
-            type="submit"
-            disabled={!file || isUploading}
-            className="self-start bg-zinc-100 text-zinc-900 font-bold px-6 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white transition-colors uppercase tracking-wider"
-          >
-            {isUploading ? "Processando..." : "Analisar Arquivo"}
-          </button>
-        </form>
+      {isHistoryOpen && history.length > 0 && (
+        <HistorySidebar
+          history={history}
+          onSelectReport={(selected) => {
+            setReport(selected);
+            setFile(null);
+            setIsHistoryOpen(false);
+          }}
+          onClearHistory={handleClearHistory}
+          onClose={() => setIsHistoryOpen(false)}
+        />
+      )}
 
-        {status && !error && !report && (
-          <div className="mt-8 pt-6 border-t border-[var(--border)]">
-            <p className="font-mono text-sm text-amber-400 animate-pulse">
-              &gt; {status}
-            </p>
-          </div>
-        )}
+      {!report && (
+        <section className="flex flex-col gap-6">
+          <Dropzone
+            selectedFile={file}
+            onFileSelect={(selected) => {
+              setFile(selected);
+              setError(null);
+            }}
+            onClearFile={() => setFile(null)}
+            onSubmit={handleStartAnalysis}
+            isUploading={isUploading}
+            disabled={isUploading}
+          />
 
-        {error && (
-          <div className="mt-8 pt-6 border-t border-[var(--border)]">
-            <p className="font-mono text-sm text-red-500">
-              [ERRO] {error}
-            </p>
-          </div>
-        )}
-      </section>
+          {isUploading && (
+            <AnalysisProgress step={step} statusText={statusText} />
+          )}
 
-      {report && (
-        <section className="border border-[var(--border)] bg-[#181a1f]">
-          <div className="border-b border-[var(--border)] p-4 bg-[#1e2026]">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
-              Analysis Report // {file?.name}
-            </h2>
-          </div>
-          <div className="p-8">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-mono text-zinc-500 uppercase">Malicious</span>
-                <span className={`text-3xl font-mono ${report.malicious > 0 ? 'text-red-500' : 'text-zinc-100'}`}>
-                  {report.malicious}
-                </span>
-              </div>
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-mono text-zinc-500 uppercase">Suspicious</span>
-                <span className={`text-3xl font-mono ${report.suspicious > 0 ? 'text-amber-500' : 'text-zinc-100'}`}>
-                  {report.suspicious}
-                </span>
-              </div>
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-mono text-zinc-500 uppercase">Total Engines</span>
-                <span className="text-3xl font-mono text-zinc-100">
-                  {report.total_engines}
-                </span>
-              </div>
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-mono text-zinc-500 uppercase">Verdict</span>
-                <span className={`text-sm font-bold mt-2 ${
-                  report.malicious > 0 ? 'text-red-500' : 
-                  report.suspicious > 0 ? 'text-amber-500' : 'text-green-500'
-                }`}>
-                  {report.malicious > 0 ? 'DANGER' : 
-                   report.suspicious > 0 ? 'WARNING' : 'CLEAN'}
-                </span>
-              </div>
+          {error && (
+            <div className="p-4 bg-red-950/40 border border-red-800 text-red-400 font-mono text-xs flex items-center justify-between">
+              <span>[ERRO] {error}</span>
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                className="text-zinc-400 hover:text-white uppercase ml-4"
+              >
+                [&times;]
+              </button>
             </div>
-          </div>
+          )}
         </section>
       )}
+
+      {report && <ReportCard report={report} onReset={handleReset} />}
     </main>
   );
 }

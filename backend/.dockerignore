@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+!.env.example
+vt-doc-guardian.py
+legacy_cli/
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.git/
+.gitignore

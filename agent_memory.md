@@ -1,11 +1,17 @@
 # Memória do Agente: VT Doc Guardian
 
-## 2026-10-04
-- **Arquitetura Fullstack:** O projeto deixou de ser um script Python solto e virou um Monorepo.
-- **Backend:** Usando FastAPI + HTTPX (assíncrono), lendo variáveis do `.env` e rodando na porta 8000.
-- **Frontend:** Next.js 15 (Pages Router) + TailwindCSS, focado em cibersegurança (dark theme, dados objetivos) hospedável na Vercel. Faz polling no backend para evitar problemas de timeout na hospedagem serverless.
-- **Integração com GitHub:**
-  - Branch `develop` é a principal para trabalho.
-  - Templates criados para PRs e Issues.
-  - GitHub Actions criadas para CI (lint), Release Please e vinculação automática ao GitHub Projects V2 (Kanban).
-- **Pendências / Futuro:** Decidir se haverá persistência de histórico (banco de dados) se a Madu quiser expandir a ferramenta. Atualmente a análise não é salva (o front esquece após o reload).
+## Estado Atual do Projeto
+- **Backend (FastAPI):**
+  - Estrutura modular em `backend/app/` (`core/config.py`, `schemas/analysis.py`, `services/validator.py`, `services/virustotal.py`, `api/routes.py`).
+  - Lifespan gerenciando instância persistente de `httpx.AsyncClient` para reaproveitamento de conexões.
+  - Fluxo Hash-First: consulta `GET /files/{sha256}` antes do upload de binário, retornando laudos existentes em milissegundos.
+  - Suporte a suítes de escritório: `.pdf`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.pptx`, `.ppt`, `.pps`, `.ppsx`, `.odt`, `.ods`, `.odp`, `.rtf` com validação de bytes (`python-magic`).
+  - Script CLI legado preservado em `backend/legacy_cli/`.
+  - Suíte de testes unitários com Pytest em `backend/tests/`.
+- **Frontend (Next.js 15+ App Router):**
+  - Interface tática de cibersegurança dividida em componentes: `Header`, `Dropzone` (drag & drop), `AnalysisProgress` (stepper em 4 fases), `ReportCard` (motores positivos e hash copiável) e `HistorySidebar` (persistência das últimas 5 análises no `localStorage`).
+  - Polling a cada 15 segundos com teto de 12 tentativas para respeitar a cota da API pública do VirusTotal (4 req/min).
+  - Tipagem estrita TypeScript e conformidade total com ESLint.
+- **CI / GitHub Actions:**
+  - `ci.yml` executa `flake8` e `pytest` no backend (com `libmagic1`), e `npm run lint` e `npm run build` no frontend.
+  - Branch principal de trabalho: `develop`.

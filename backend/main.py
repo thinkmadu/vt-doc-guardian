@@ -1,111 +1,48 @@
-import os
-from pathlib import Path
-
+from contextlib import asynccontextmanager
 import httpx
-import magic
-from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
-# Carrega variáveis de ambiente
-load_dotenv()
+from app.api.routes import router
+from app.core.config import settings
 
-app = FastAPI(title="VT Doc Guardian API")
 
-# Libera o CORS para o frontend (seja no localhost ou hospedado na Vercel)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Gerencia o ciclo de vida do cliente HTTP com reaproveitamento de conexões."""
+    app.state.http_client = httpx.AsyncClient(timeout=30.0)
+    yield
+    await app.state.http_client.aclose()
+
+
+app = FastAPI(
+    title="VT Doc Guardian API",
+    description="Motor de quarentena e análise estática de documentos com VirusTotal v3",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# Configuração de CORS com restrição de origens
+origins = settings.ALLOWED_ORIGINS
+# Se "*" estiver presente, desliga credentials para conformidade com a especificação W3C
+allow_creds = False if "*" in origins else True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=origins,
+    allow_credentials=allow_creds,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-VT_API_KEY = os.getenv("VT_API_KEY", "").strip()
-API_URL = "https://www.virustotal.com/api/v3"
-
-# Validações mantidas do script antigo
-MIN_FILE_SIZE = 512
-MAX_FILE_SIZE = 32 * 1024 * 1024
-
-SUPPORTED_MIME = {
-    '.pdf': 'application/pdf',
-    '.ppt': 'application/vnd.ms-powerpoint',
-    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    '.pps': 'application/vnd.ms-powerpoint',
-    '.ppsx': 'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
-    '.odp': 'application/vnd.oasis.opendocument.presentation'
-}
+# Inclui as rotas do documento
+app.include_router(router)
 
 
-class AnalysisResponse(BaseModel):
-    analysis_id: str
-    filename: str
-    status: str
-
-
-@app.post("/upload", response_model=AnalysisResponse)
-async def upload_document(file: UploadFile = File(...)):
-    if not VT_API_KEY:
-        raise HTTPException(status_code=500, detail="Chave de API não configurada.")
-
-    ext = Path(file.filename).suffix.lower()
-    if ext not in SUPPORTED_MIME:
-        raise HTTPException(status_code=400, detail=f"Extensão não suportada: {ext}")
-
-    content = await file.read()
-    file_size = len(content)
-
-    if file_size < MIN_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="Arquivo muito pequeno.")
-    if file_size > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="Arquivo excede limite de 32MB.")
-
-    mime_detector = magic.Magic(mime=True)
-    detected_mime = mime_detector.from_buffer(content)
-
-    if detected_mime != SUPPORTED_MIME[ext]:
-        raise HTTPException(status_code=400, detail="MIME type incorreto para a extensão informada.")
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        files = {'file': (file.filename, content, detected_mime)}
-        headers = {'x-apikey': VT_API_KEY}
-        response = await client.post(f"{API_URL}/files", headers=headers, files=files)
-        
-        if response.status_code != 200:
-            raise HTTPException(status_code=502, detail=f"Erro na API do VirusTotal: {response.text}")
-            
-        data = response.json()
-        analysis_id = data['data']['id']
-        
-    return AnalysisResponse(analysis_id=analysis_id, filename=file.filename, status="queued")
-
-
-@app.get("/status/{analysis_id}")
-async def get_status(analysis_id: str):
-    if not VT_API_KEY:
-        raise HTTPException(status_code=500, detail="Chave de API não configurada.")
-
-    headers = {'x-apikey': VT_API_KEY}
-    
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(f"{API_URL}/analyses/{analysis_id}", headers=headers)
-        
-        if response.status_code != 200:
-            raise HTTPException(status_code=502, detail="Falha ao checar status no VirusTotal")
-            
-        report = response.json()['data']
-        status = report['attributes']['status']
-        
-        if status == 'completed':
-            stats = report['attributes']['stats']
-            return {
-                "status": "completed",
-                "stats": stats,
-                "malicious": stats.get('malicious', 0),
-                "suspicious": stats.get('suspicious', 0),
-                "total_engines": sum(stats.values())
-            }
-        
-        return {"status": status}
+@app.get("/health")
+async def health_check():
+    """Endpoint de checagem de saúde da API."""
+    return {
+        "status": "healthy",
+        "api_configured": bool(settings.VT_API_KEY),
+    }
